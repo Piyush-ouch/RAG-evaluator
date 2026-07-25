@@ -1,0 +1,72 @@
+# =========================================================
+# Production Overrides
+# Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# =========================================================
+
+services:
+  backend:
+    build:
+      target: production
+    restart: always
+    environment:
+      APP_ENV: production
+      APP_DEBUG: "false"
+    deploy:
+      replicas: 3
+      resources:
+        limits:
+          memory: 1G
+          cpus: "1.0"
+        reservations:
+          memory: 512M
+          cpus: "0.5"
+
+  worker:
+    build:
+      target: production
+    restart: always
+    command: >
+      celery -A app.workers.celery_app worker
+      -l warning -Q evaluation,reports,notifications,data,scheduled,maintenance
+      --concurrency=8 --max-tasks-per-child=100
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          memory: 2G
+          cpus: "2.0"
+
+  beat:
+    build:
+      target: production
+    restart: always
+
+  frontend:
+    build:
+      target: production
+    restart: always
+    command: node server.js
+    deploy:
+      replicas: 2
+
+  # -------------------------------------------------------
+  # Nginx Reverse Proxy
+  # -------------------------------------------------------
+  nginx:
+    image: nginx:alpine
+    container_name: rageval-nginx
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./docker/nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - backend
+      - frontend
+
+  # Remove dev-only services in production
+  flower:
+    deploy:
+      replicas: 0

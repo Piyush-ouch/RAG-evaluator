@@ -1,0 +1,109 @@
+# ===========================
+# Python
+# ===========================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+*.whl
+.venv/
+venv/
+env/
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+
+# ===========================
+# Node.js / Frontend
+# ===========================
+node_modules/
+.next/
+out/
+.turbo/
+*.tsbuildinfo
+.vercel
+
+# ===========================
+# Environment & Secrets
+# ===========================
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env.*.local
+!.env.example
+
+# ===========================
+# IDE
+# ===========================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ===========================
+# Testing & Coverage
+# ===========================
+htmlcov/
+.coverage
+.coverage.*
+coverage/
+.nyc_output/
+*.lcov
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ===========================
+# Docker
+# ===========================
+docker-data/
+*.log
+
+# ===========================
+# Build & Artifacts
+# ===========================
+*.pyc
+*.pyo
+*.db
+*.sqlite3
+staticfiles/
+mediafiles/
+uploads/
+
+# ===========================
+# OS
+# ===========================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Desktop.ini
+
+# ===========================
+# Alembic
+# ===========================
+# Keep versions tracked
+!backend/alembic/versions/.gitkeep
+
+# ===========================
+# MinIO / S3 Local Data
+# ===========================
+minio-data/
+
+# ===========================
+# Grafana / Prometheus Data
+# ===========================
+grafana-data/
+prometheus-data/

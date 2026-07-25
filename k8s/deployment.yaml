@@ -1,0 +1,96 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: rageval
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rageval-backend
+  namespace: rageval
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: rageval-backend
+  template:
+    metadata:
+      labels:
+        app: rageval-backend
+    spec:
+      containers:
+        - name: backend
+          image: rageval-backend:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: rageval-config
+            - secretRef:
+                name: rageval-secrets
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "500m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rageval-backend-service
+  namespace: rageval
+spec:
+  selector:
+    app: rageval-backend
+  ports:
+    - protocol: TCP
+      port: 8000
+      targetPort: 8000
+  type: ClusterIP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rageval-worker
+  namespace: rageval
+spec:
+  replicas: 4
+  selector:
+    matchLabels:
+      app: rageval-worker
+  template:
+    metadata:
+      labels:
+        app: rageval-worker
+    spec:
+      containers:
+        - name: worker
+          image: rageval-backend:latest
+          command: ["celery", "-A", "app.workers.celery_app", "worker", "-l", "info", "-Q", "evaluation,reports,notifications,data"]
+          envFrom:
+            - configMapRef:
+                name: rageval-config
+            - secretRef:
+                name: rageval-secrets
+          resources:
+            requests:
+              memory: "1Gi"
+              cpu: "1000m"
+            limits:
+              memory: "2Gi"
+              cpu: "2000m"

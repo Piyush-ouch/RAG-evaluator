@@ -14,9 +14,17 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, String, text
+from sqlalchemy import DateTime, MetaData, String, text
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import DeclarativeBase, Mapped, MappedAsDataclass, mapped_column
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+naming_convention = {
+    "ix": "ix_%(column_0_label)s",
+    "uq": "uq_%(table_name)s_%(column_0_name)s",
+    "ck": "ck_%(table_name)s_%(constraint_name)s",
+    "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
+    "pk": "pk_%(table_name)s",
+}
 
 
 class Base(DeclarativeBase):
@@ -29,16 +37,7 @@ class Base(DeclarativeBase):
     - Consistent naming convention for constraints
     """
 
-    # Naming convention for auto-generated constraint names
-    # This ensures predictable names for Alembic migrations
-    metadata = DeclarativeBase.metadata
-    metadata.naming_convention = {
-        "ix": "ix_%(column_0_label)s",
-        "uq": "uq_%(table_name)s_%(column_0_name)s",
-        "ck": "ck_%(table_name)s_%(constraint_name)s",
-        "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
-        "pk": "pk_%(table_name)s",
-    }
+    metadata = MetaData(naming_convention=naming_convention)
 
 
 class TimestampMixin:
@@ -58,28 +57,11 @@ class TimestampMixin:
     )
 
 
-class SoftDeleteMixin:
-    """Adds soft-delete support with a deleted_at timestamp."""
-
-    deleted_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True),
-        default=None,
-        nullable=True,
-        index=True,
-    )
-
-    @property
-    def is_deleted(self) -> bool:
-        """Check if the record is soft-deleted."""
-        return self.deleted_at is not None
-
-
 class TenantMixin:
     """
-    Adds org_id for multi-tenant isolation.
+    Adds org_id column for multi-tenant isolation.
 
-    All queries on tenant-scoped models MUST filter by org_id.
-    This is enforced at the repository layer.
+    All tenant-scoped models inherit from this mixin.
     """
 
     org_id: Mapped[uuid.UUID] = mapped_column(
@@ -89,6 +71,21 @@ class TenantMixin:
     )
 
 
+class SoftDeleteMixin:
+    """Adds deleted_at column for soft-delete functionality."""
+
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        default=None,
+        index=True,
+    )
+
+    @property
+    def is_deleted(self) -> bool:
+        return self.deleted_at is not None
+
+
 def generate_uuid() -> uuid.UUID:
-    """Generate a new UUID v4."""
+    """Generate a v4 UUID."""
     return uuid.uuid4()

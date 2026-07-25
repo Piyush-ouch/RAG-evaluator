@@ -161,10 +161,11 @@ def _configure_middleware(app: FastAPI, settings: "Settings") -> None:  # noqa: 
     """Configure application middleware stack."""
     from app.config import Settings  # noqa: F811
 
-    # CORS
+    # CORS — allow configured origins + any localhost port in development
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.cors_origins,
+        allow_origins=settings.cors_origins if isinstance(settings.cors_origins, list) else [settings.cors_origins],
+        allow_origin_regex=r"http://(localhost|127\.0\.0\.1)(:\d+)?" if settings.is_development else None,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

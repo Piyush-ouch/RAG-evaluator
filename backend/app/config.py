@@ -47,8 +47,8 @@ class Settings(BaseSettings):
     app_version: str = "0.1.0"
     secret_key: str = "change-me-to-a-random-64-char-string"
     encryption_key: str = "change-me-to-a-fernet-key"
-    allowed_hosts: list[str] = ["localhost", "127.0.0.1"]
-    cors_origins: list[str] = ["http://localhost:3000"]
+    allowed_hosts: str | list[str] = ["localhost", "127.0.0.1"]
+    cors_origins: str | list[str] = ["http://localhost:3000"]
 
     # ---------------------------------------------------------
     # Server
@@ -189,14 +189,22 @@ class Settings(BaseSettings):
     @classmethod
     def parse_cors_origins(cls, v: Any) -> list[str]:
         if isinstance(v, str):
-            return [origin.strip() for origin in v.split(",")]
+            v_trimmed = v.strip()
+            if v_trimmed.startswith("[") and v_trimmed.endswith("]"):
+                import json
+                return json.loads(v_trimmed)
+            return [origin.strip() for origin in v.split(",") if origin.strip()]
         return v
 
     @field_validator("allowed_hosts", mode="before")
     @classmethod
     def parse_allowed_hosts(cls, v: Any) -> list[str]:
         if isinstance(v, str):
-            return [host.strip() for host in v.split(",")]
+            v_trimmed = v.strip()
+            if v_trimmed.startswith("[") and v_trimmed.endswith("]"):
+                import json
+                return json.loads(v_trimmed)
+            return [host.strip() for host in v.split(",") if host.strip()]
         return v
 
 

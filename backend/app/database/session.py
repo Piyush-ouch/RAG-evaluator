@@ -2,7 +2,7 @@
 Async SQLAlchemy Session Factory
 
 Provides:
-- Async engine with connection pooling
+- Async engine with connection pooling (PostgreSQL / SQLite)
 - Async session factory
 - Dependency injection for FastAPI routes
 """
@@ -23,18 +23,21 @@ from app.config import get_settings
 settings = get_settings()
 
 # ---------------------------------------------------------
-# Engine
+# Engine Configuration
 # ---------------------------------------------------------
-engine = create_async_engine(
-    settings.database_url,
-    echo=settings.database_echo,
-    pool_size=settings.database_pool_size,
-    max_overflow=settings.database_max_overflow,
-    pool_pre_ping=True,
-    pool_recycle=3600,
-    # Use NullPool for testing to avoid connection leaks
-    poolclass=NullPool if settings.is_testing else None,
-)
+engine_kwargs: dict = {
+    "echo": settings.database_echo,
+}
+
+if not settings.database_url.startswith("sqlite"):
+    engine_kwargs.update({
+        "pool_size": settings.database_pool_size,
+        "max_overflow": settings.database_max_overflow,
+        "pool_pre_ping": True,
+        "pool_recycle": 3600,
+    })
+
+engine = create_async_engine(settings.database_url, **engine_kwargs)
 
 # ---------------------------------------------------------
 # Session Factory
@@ -58,10 +61,6 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
     Usage:
         @router.get("/items")
         async def list_items(db: AsyncSession = Depends(get_db)):
-            ...
-
-    The session is automatically committed on success
-    and rolled back on exception.
     """
     async with async_session_factory() as session:
         try:
@@ -70,3 +69,5 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         except Exception:
             await session.rollback()
             raise
+        finally:
+            await session.close()

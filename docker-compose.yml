@@ -46,7 +46,7 @@ services:
   # MinIO (S3-compatible Object Storage)
   # -------------------------------------------------------
   minio:
-    image: minio/minio:RELEASE.2024-03-26T22-10-48Z
+    image: minio/minio:latest
     container_name: rageval-minio
     restart: unless-stopped
     environment:
@@ -63,7 +63,7 @@ services:
   # MinIO Init (create default bucket)
   # -------------------------------------------------------
   minio-init:
-    image: minio/mc:RELEASE.2024-03-03T21-36-54Z
+    image: minio/mc:latest
     container_name: rageval-minio-init
     depends_on:
       - minio

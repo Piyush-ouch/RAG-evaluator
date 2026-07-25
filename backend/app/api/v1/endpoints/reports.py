@@ -46,10 +46,10 @@ async def list_reports(
 @router.post("/{evaluation_id}/generate")
 async def generate_report(
     evaluation_id: uuid.UUID,
-    report_type: str = "full",
-    format: str = "pdf",
     db: DbSession,
     current_user: CurrentUser,
+    report_type: str = "full",
+    format: str = "pdf",
 ) -> dict:
     """Trigger report generation for an evaluation."""
     from app.workers.tasks.report_tasks import generate_report_task

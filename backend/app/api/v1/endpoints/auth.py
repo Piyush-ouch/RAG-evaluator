@@ -61,7 +61,7 @@ async def register(
         raise ConflictError("An account with this email already exists.")
 
     # Create organization
-    from python_slugify import slugify
+    from slugify import slugify
     org_slug = slugify(request.organization_name)
 
     # Ensure unique slug
@@ -370,7 +370,7 @@ async def _handle_oauth_user(
     If the user exists (matched by email), link the OAuth provider.
     If new, create user + organization.
     """
-    from python_slugify import slugify
+    from slugify import slugify
 
     stmt = select(User).where(User.email == email, User.deleted_at.is_(None))
     result = await db.execute(stmt)

@@ -45,9 +45,9 @@ async def list_api_keys(db: DbSession, current_user: CurrentUser) -> list[dict]:
 @router.post("/", status_code=201, dependencies=[Depends(require_role(UserRole.OWNER))])
 async def create_api_key(
     name: str,
-    permissions: list[str] | None = None,
     db: DbSession,
     current_user: CurrentUser,
+    permissions: list[str] | None = None,
 ) -> dict:
     """Create a new API key. The raw key is shown ONCE."""
     raw_key, key_hash = generate_api_key()

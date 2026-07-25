@@ -125,9 +125,9 @@ async def add_questions(
 @router.post("/{suite_id}/import", status_code=201)
 async def import_dataset(
     suite_id: uuid.UUID,
-    file: UploadFile = File(...),
     db: DbSession,
     current_user: CurrentUser,
+    file: UploadFile = File(...),
 ) -> dict:
     """Import questions from CSV, JSON, or Excel file."""
     if not file.filename:

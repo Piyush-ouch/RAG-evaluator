@@ -8,7 +8,7 @@ import uuid
 
 import structlog
 from fastapi import APIRouter, Depends
-from python_slugify import slugify
+from slugify import slugify
 from sqlalchemy import select
 
 from app.api.deps import CurrentUser, DbSession, Pagination, require_role

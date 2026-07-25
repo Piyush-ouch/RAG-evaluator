@@ -177,6 +177,6 @@ async def cancel_evaluation(
     # Revoke Celery task
     if evaluation.celery_task_id:
         from app.workers.celery_app import celery_app
-        celery_app.control.revoke(evaluation.celery_task_id, terminate=True)
+        celery_app.control.revoke(str(evaluation.celery_task_id), terminate=True)
 
     return {"message": "Evaluation cancelled."}

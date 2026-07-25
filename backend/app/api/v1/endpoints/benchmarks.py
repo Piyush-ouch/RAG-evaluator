@@ -126,8 +126,8 @@ async def add_questions(
 async def import_dataset(
     suite_id: uuid.UUID,
     file: UploadFile = File(...),
-    db: DbSession = None,
-    current_user: CurrentUser = None,
+    db: DbSession,
+    current_user: CurrentUser,
 ) -> dict:
     """Import questions from CSV, JSON, or Excel file."""
     if not file.filename:

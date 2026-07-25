@@ -181,4 +181,5 @@ def require_role(minimum_role: UserRole):
     return role_checker
 
 
-CurrentUser = Annotated[object, Depends(get_current_active_user)]
+from typing import Any
+CurrentUser = Annotated[Any, Depends(get_current_active_user)]

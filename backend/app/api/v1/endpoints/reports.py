@@ -48,8 +48,8 @@ async def generate_report(
     evaluation_id: uuid.UUID,
     report_type: str = "full",
     format: str = "pdf",
-    db: DbSession = None,
-    current_user: CurrentUser = None,
+    db: DbSession,
+    current_user: CurrentUser,
 ) -> dict:
     """Trigger report generation for an evaluation."""
     from app.workers.tasks.report_tasks import generate_report_task

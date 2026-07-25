@@ -40,9 +40,9 @@ async def get_billing_info(
 @router.post("/checkout", dependencies=[Depends(require_role(UserRole.OWNER))])
 async def create_checkout_session(
     plan: str,
+    db: DbSession,
+    current_user: CurrentUser,
     interval: str = "monthly",
-    db: DbSession = None,
-    current_user: CurrentUser = None,
 ) -> dict:
     """Create a Stripe Checkout session."""
     import stripe

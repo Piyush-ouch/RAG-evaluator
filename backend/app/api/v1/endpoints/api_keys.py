@@ -46,8 +46,8 @@ async def list_api_keys(db: DbSession, current_user: CurrentUser) -> list[dict]:
 async def create_api_key(
     name: str,
     permissions: list[str] | None = None,
-    db: DbSession = None,
-    current_user: CurrentUser = None,
+    db: DbSession,
+    current_user: CurrentUser,
 ) -> dict:
     """Create a new API key. The raw key is shown ONCE."""
     raw_key, key_hash = generate_api_key()

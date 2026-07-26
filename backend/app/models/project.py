@@ -69,11 +69,12 @@ class Project(Base, TimestampMixin, SoftDeleteMixin, TenantMixin):
     )
 
     # Created by
-    created_by_id: Mapped[uuid.UUID] = mapped_column(
+    created_by_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id"),
-        nullable=False,
+        nullable=True,
     )
+
 
     # Relationships
     organization: Mapped["Organization"] = relationship(

@@ -1,8 +1,8 @@
 """
 FastAPI Application Factory
 
-Uses the factory pattern to create the FastAPI application instance.
-This allows different configurations for testing, development, and production.
+Configured with CORS middleware, OpenTelemetry, Prometheus metrics,
+Sentry SDK, and Kubernetes health probes.
 """
 
 from __future__ import annotations
@@ -11,10 +11,11 @@ from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
 import structlog
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import ORJSONResponse
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from app.config import get_settings
 
@@ -25,12 +26,25 @@ logger = structlog.get_logger(__name__)
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """
     Application lifespan manager.
-
-    Handles startup and shutdown events:
-    - Startup: Initialize database pool, Redis connection, S3 client
-    - Shutdown: Close all connections gracefully
+    Handles startup and shutdown events.
     """
     settings = get_settings()
+
+    # Initialize Sentry SDK if DSN configured
+    if settings.sentry_dsn and settings.sentry_dsn.strip():
+        try:
+            import sentry_sdk
+            from sentry_sdk.integrations.fastapi import FastApiIntegration
+            sentry_sdk.init(
+                dsn=settings.sentry_dsn,
+                environment=settings.app_env.value,
+                integrations=[FastApiIntegration()],
+                traces_sample_rate=1.0,
+            )
+            logger.info("sentry_initialized")
+        except Exception as err:
+            logger.warning("sentry_init_failed", error=str(err))
+
     logger.info(
         "application_starting",
         app_name=settings.app_name,
@@ -40,20 +54,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # --- Startup ---
     from app.database.session import engine
+    from app.database.base import Base
+    import app.models  # noqa: F401
 
-    # Verify database connectivity
     async with engine.begin() as conn:
-        await conn.execute(
-            __import__("sqlalchemy").text("SELECT 1")
-        )
+        await conn.run_sync(Base.metadata.create_all)
     logger.info("database_connected")
 
-    # Initialize Redis
+
     from app.core.redis import redis_client
     await redis_client.initialize()
     logger.info("redis_connected")
 
-    # Initialize S3
     from app.core.storage import storage_client
     await storage_client.ensure_bucket()
     logger.info("s3_connected", bucket=settings.s3_bucket_name)
@@ -64,27 +76,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # --- Shutdown ---
     logger.info("application_shutting_down")
-
-    from app.database.session import engine
     await engine.dispose()
-
-    from app.core.redis import redis_client
     await redis_client.close()
-
     logger.info("application_stopped")
 
 
 def create_app() -> FastAPI:
-    """
-    FastAPI application factory.
-
-    Creates and configures the FastAPI application with:
-    - CORS middleware
-    - Trusted host middleware
-    - Exception handlers
-    - API routers
-    - OpenAPI documentation
-    """
+    """FastAPI application factory."""
     settings = get_settings()
 
     app = FastAPI(
@@ -102,47 +100,27 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # ---------------------------------------------------------
-    # Middleware (order matters — outermost first)
-    # ---------------------------------------------------------
     _configure_middleware(app, settings)
-
-    # ---------------------------------------------------------
-    # Exception Handlers
-    # ---------------------------------------------------------
     _configure_exception_handlers(app)
-
-    # ---------------------------------------------------------
-    # Routers
-    # ---------------------------------------------------------
     _configure_routers(app)
 
-    # ---------------------------------------------------------
-    # Health Check
-    # ---------------------------------------------------------
     @app.get("/health", tags=["Health"])
     async def health_check() -> dict[str, str]:
         return {"status": "healthy", "version": settings.app_version}
 
     @app.get("/ready", tags=["Health"])
     async def readiness_check() -> dict[str, str]:
-        """Kubernetes readiness probe — checks all dependencies."""
         from app.database.session import engine
         from app.core.redis import redis_client
 
         checks: dict[str, str] = {}
-
-        # Database
         try:
             async with engine.begin() as conn:
-                await conn.execute(
-                    __import__("sqlalchemy").text("SELECT 1")
-                )
+                await conn.execute(__import__("sqlalchemy").text("SELECT 1"))
             checks["database"] = "ok"
         except Exception:
             checks["database"] = "error"
 
-        # Redis
         try:
             if await redis_client.ping():
                 checks["redis"] = "ok"
@@ -154,14 +132,15 @@ def create_app() -> FastAPI:
         status = "ready" if all(v == "ok" for v in checks.values()) else "not_ready"
         return {"status": status, **checks}
 
+    @app.get("/metrics", tags=["Observability"])
+    async def metrics_endpoint() -> Response:
+        """Prometheus metrics endpoint."""
+        return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
     return app
 
 
-def _configure_middleware(app: FastAPI, settings: "Settings") -> None:  # noqa: F821
-    """Configure application middleware stack."""
-    from app.config import Settings  # noqa: F811
-
-    # CORS — allow configured origins + any localhost port in development
+def _configure_middleware(app: FastAPI, settings: "Settings") -> None:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins if isinstance(settings.cors_origins, list) else [settings.cors_origins],
@@ -172,14 +151,12 @@ def _configure_middleware(app: FastAPI, settings: "Settings") -> None:  # noqa: 
         expose_headers=["X-Request-ID", "X-Process-Time"],
     )
 
-    # Trusted Hosts (production only)
     if settings.is_production:
         app.add_middleware(
             TrustedHostMiddleware,
             allowed_hosts=settings.allowed_hosts,
         )
 
-    # Custom middleware
     from app.middleware.request_id import RequestIDMiddleware
     from app.middleware.process_time import ProcessTimeMiddleware
     from app.middleware.logging import LoggingMiddleware
@@ -190,7 +167,6 @@ def _configure_middleware(app: FastAPI, settings: "Settings") -> None:  # noqa: 
 
 
 def _configure_exception_handlers(app: FastAPI) -> None:
-    """Register custom exception handlers."""
     from app.core.exceptions import (
         AppException,
         app_exception_handler,
@@ -205,7 +181,5 @@ def _configure_exception_handlers(app: FastAPI) -> None:
 
 
 def _configure_routers(app: FastAPI) -> None:
-    """Mount all API routers."""
     from app.api.v1.router import api_v1_router
-
     app.include_router(api_v1_router, prefix="/api/v1")

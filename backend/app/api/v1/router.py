@@ -26,6 +26,7 @@ from app.api.v1.endpoints.billing import router as billing_router
 from app.api.v1.endpoints.api_keys import router as api_key_router
 from app.api.v1.endpoints.audit import router as audit_router
 from app.api.v1.endpoints.demo import router as demo_router
+from app.api.v1.endpoints.websocket import router as ws_router
 
 api_v1_router.include_router(auth_router)
 api_v1_router.include_router(org_router)
@@ -38,3 +39,5 @@ api_v1_router.include_router(billing_router)
 api_v1_router.include_router(api_key_router)
 api_v1_router.include_router(audit_router)
 api_v1_router.include_router(demo_router)
+api_v1_router.include_router(ws_router)
+

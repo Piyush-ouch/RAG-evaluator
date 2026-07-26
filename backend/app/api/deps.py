@@ -183,3 +183,21 @@ def require_role(minimum_role: UserRole):
 
 from typing import Any
 CurrentUser = Annotated[Any, Depends(get_current_active_user)]
+
+
+async def get_optional_user(
+    db: DbSession,
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    x_api_key: str | None = Header(None, alias="X-API-Key"),
+):
+    """Optional authentication dependency — returns User if valid, None if missing/invalid."""
+    try:
+        if credentials or x_api_key:
+            return await get_current_user(db, credentials, x_api_key)
+    except Exception:
+        pass
+    return None
+
+
+OptionalUser = Annotated[Any, Depends(get_optional_user)]
+

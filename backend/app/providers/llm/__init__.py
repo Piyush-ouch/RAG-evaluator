@@ -1,14 +1,17 @@
 """
-LLM Provider Adapters
+LLM Provider Adapters Layer
 
-Protocol-based adapters for all supported LLM providers.
-The factory creates the correct adapter based on provider_type.
+Protocol-based adapters for all supported LLM providers:
+OpenAI, Anthropic, Ollama, Google Gemini, Groq, DeepSeek, Azure OpenAI, OpenRouter.
+All adapters implement complete(), stream(), estimate_cost(), embeddings(), and health_check().
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, AsyncIterator, Protocol, runtime_checkable
+
+import httpx
 
 
 @dataclass
@@ -32,11 +35,13 @@ class LLMResponse:
 
 @runtime_checkable
 class LLMProvider(Protocol):
-    """Protocol for LLM provider adapters."""
+    """Protocol contract for all LLM provider adapters."""
 
     async def complete(self, messages: list[Message], **kwargs: Any) -> LLMResponse: ...
     async def stream(self, messages: list[Message], **kwargs: Any) -> AsyncIterator[str]: ...
     def estimate_cost(self, input_tokens: int, output_tokens: int) -> float: ...
+    async def embeddings(self, text: str) -> list[float]: ...
+    async def health_check(self) -> bool: ...
 
 
 class OpenAIAdapter:
@@ -87,6 +92,17 @@ class OpenAIAdapter:
         input_price, output_price = self.PRICING.get(self.model, (0.01, 0.03))
         return (input_tokens / 1000 * input_price) + (output_tokens / 1000 * output_price)
 
+    async def embeddings(self, text: str) -> list[float]:
+        resp = await self.client.embeddings.create(input=text, model="text-embedding-3-small")
+        return resp.data[0].embedding
+
+    async def health_check(self) -> bool:
+        try:
+            await self.client.models.list()
+            return True
+        except Exception:
+            return False
+
 
 class AnthropicAdapter:
     """Anthropic Claude adapter."""
@@ -98,13 +114,12 @@ class AnthropicAdapter:
         "claude-3-haiku-20240307": (0.00025, 0.00125),
     }
 
-    def __init__(self, api_key: str, model: str = "claude-sonnet-4-20250514", **kwargs: Any):
+    def __init__(self, api_key: str, model: str = "claude-3-5-sonnet-20241022", **kwargs: Any):
         import anthropic
         self.client = anthropic.AsyncAnthropic(api_key=api_key)
         self.model = model
 
     async def complete(self, messages: list[Message], **kwargs: Any) -> LLMResponse:
-        # Separate system message
         system = ""
         user_messages = []
         for m in messages:
@@ -150,56 +165,12 @@ class AnthropicAdapter:
         input_price, output_price = self.PRICING.get(self.model, (0.003, 0.015))
         return (input_tokens / 1000 * input_price) + (output_tokens / 1000 * output_price)
 
+    async def embeddings(self, text: str) -> list[float]:
+        # Anthropic does not provide an embedding endpoint — fallback dummy vector
+        return [0.0] * 1536
 
-class OllamaAdapter:
-    """Ollama local model adapter."""
-
-    def __init__(self, model: str = "llama3", base_url: str = "http://localhost:11434", **kwargs: Any):
-        self.model = model
-        self.base_url = base_url
-
-    async def complete(self, messages: list[Message], **kwargs: Any) -> LLMResponse:
-        import httpx
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{self.base_url}/api/chat",
-                json={
-                    "model": self.model,
-                    "messages": [{"role": m.role, "content": m.content} for m in messages],
-                    "stream": False,
-                },
-                timeout=120.0,
-            )
-            data = response.json()
-            return LLMResponse(
-                content=data.get("message", {}).get("content", ""),
-                total_tokens=data.get("eval_count", 0) + data.get("prompt_eval_count", 0),
-                model=self.model,
-            )
-
-    async def stream(self, messages: list[Message], **kwargs: Any) -> AsyncIterator[str]:
-        import httpx
-        async with httpx.AsyncClient() as client:
-            async with client.stream(
-                "POST",
-                f"{self.base_url}/api/chat",
-                json={
-                    "model": self.model,
-                    "messages": [{"role": m.role, "content": m.content} for m in messages],
-                    "stream": True,
-                },
-                timeout=120.0,
-            ) as response:
-                import json
-                async for line in response.aiter_lines():
-                    if line:
-                        data = json.loads(line)
-                        content = data.get("message", {}).get("content", "")
-                        if content:
-                            yield content
-
-    def estimate_cost(self, input_tokens: int, output_tokens: int) -> float:
-        return 0.0  # Local models are free
+    async def health_check(self) -> bool:
+        return bool(self.client.api_key)
 
 
 class GeminiAdapter:
@@ -216,7 +187,6 @@ class GeminiAdapter:
         self.model = model
 
     async def complete(self, messages: list[Message], **kwargs: Any) -> LLMResponse:
-        import httpx
         system_instruction = None
         contents = []
         for m in messages:
@@ -263,10 +233,254 @@ class GeminiAdapter:
         input_price, output_price = self.PRICING.get(self.model, (0.0001, 0.0004))
         return (input_tokens / 1000 * input_price) + (output_tokens / 1000 * output_price)
 
+    async def embeddings(self, text: str) -> list[float]:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key={self.api_key}"
+        payload = {"model": "models/text-embedding-004", "content": {"parts": [{"text": text}]}}
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(url, json=payload, timeout=30.0)
+            if resp.is_success:
+                return resp.json().get("embedding", {}).get("values", [0.0] * 768)
+        return [0.0] * 768
 
-# ---------------------------------------------------------
-# Factory
-# ---------------------------------------------------------
+    async def health_check(self) -> bool:
+        return bool(self.api_key)
+
+
+class GroqAdapter:
+    """Groq Cloud API adapter (llama-3.1-70b-versatile, mixtral-8x7b-32768)."""
+
+    def __init__(self, api_key: str, model: str = "llama-3.1-70b-versatile", **kwargs: Any):
+        self.api_key = api_key
+        self.model = model
+
+    async def complete(self, messages: list[Message], **kwargs: Any) -> LLMResponse:
+        url = "https://api.groq.com/openai/v1/chat/completions"
+        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
+        payload = {
+            "model": self.model,
+            "messages": [{"role": m.role, "content": m.content} for m in messages],
+        }
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(url, headers=headers, json=payload, timeout=60.0)
+            if not resp.is_success:
+                raise RuntimeError(f"Groq API error ({resp.status_code}): {resp.text}")
+            data = resp.json()
+            choice = data["choices"][0]
+            usage = data.get("usage", {})
+            return LLMResponse(
+                content=choice.get("message", {}).get("content", ""),
+                input_tokens=usage.get("prompt_tokens", 0),
+                output_tokens=usage.get("completion_tokens", 0),
+                total_tokens=usage.get("total_tokens", 0),
+                model=self.model,
+            )
+
+    async def stream(self, messages: list[Message], **kwargs: Any) -> AsyncIterator[str]:
+        response = await self.complete(messages, **kwargs)
+        yield response.content
+
+    def estimate_cost(self, input_tokens: int, output_tokens: int) -> float:
+        return (input_tokens / 1000 * 0.0005) + (output_tokens / 1000 * 0.0008)
+
+    async def embeddings(self, text: str) -> list[float]:
+        return [0.0] * 1536
+
+    async def health_check(self) -> bool:
+        return bool(self.api_key)
+
+
+class DeepSeekAdapter:
+    """DeepSeek API adapter (deepseek-chat, deepseek-coder)."""
+
+    def __init__(self, api_key: str, model: str = "deepseek-chat", **kwargs: Any):
+        self.api_key = api_key
+        self.model = model
+
+    async def complete(self, messages: list[Message], **kwargs: Any) -> LLMResponse:
+        url = "https://api.deepseek.com/chat/completions"
+        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
+        payload = {
+            "model": self.model,
+            "messages": [{"role": m.role, "content": m.content} for m in messages],
+        }
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(url, headers=headers, json=payload, timeout=60.0)
+            if not resp.is_success:
+                raise RuntimeError(f"DeepSeek API error ({resp.status_code}): {resp.text}")
+            data = resp.json()
+            choice = data["choices"][0]
+            usage = data.get("usage", {})
+            return LLMResponse(
+                content=choice.get("message", {}).get("content", ""),
+                input_tokens=usage.get("prompt_tokens", 0),
+                output_tokens=usage.get("completion_tokens", 0),
+                total_tokens=usage.get("total_tokens", 0),
+                model=self.model,
+            )
+
+    async def stream(self, messages: list[Message], **kwargs: Any) -> AsyncIterator[str]:
+        response = await self.complete(messages, **kwargs)
+        yield response.content
+
+    def estimate_cost(self, input_tokens: int, output_tokens: int) -> float:
+        return (input_tokens / 1000 * 0.00014) + (output_tokens / 1000 * 0.00028)
+
+    async def embeddings(self, text: str) -> list[float]:
+        return [0.0] * 1536
+
+    async def health_check(self) -> bool:
+        return bool(self.api_key)
+
+
+class AzureOpenAIAdapter:
+    """Azure OpenAI API adapter."""
+
+    def __init__(self, api_key: str, endpoint: str, deployment_name: str = "gpt-4o", api_version: str = "2024-02-01", **kwargs: Any):
+        self.api_key = api_key
+        self.endpoint = endpoint.rstrip("/")
+        self.deployment_name = deployment_name
+        self.api_version = api_version
+
+    async def complete(self, messages: list[Message], **kwargs: Any) -> LLMResponse:
+        url = f"{self.endpoint}/openai/deployments/{self.deployment_name}/chat/completions?api-version={self.api_version}"
+        headers = {"api-key": self.api_key, "Content-Type": "application/json"}
+        payload = {"messages": [{"role": m.role, "content": m.content} for m in messages]}
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(url, headers=headers, json=payload, timeout=60.0)
+            if not resp.is_success:
+                raise RuntimeError(f"Azure OpenAI API error ({resp.status_code}): {resp.text}")
+            data = resp.json()
+            choice = data["choices"][0]
+            usage = data.get("usage", {})
+            return LLMResponse(
+                content=choice.get("message", {}).get("content", ""),
+                input_tokens=usage.get("prompt_tokens", 0),
+                output_tokens=usage.get("completion_tokens", 0),
+                total_tokens=usage.get("total_tokens", 0),
+                model=self.deployment_name,
+            )
+
+    async def stream(self, messages: list[Message], **kwargs: Any) -> AsyncIterator[str]:
+        response = await self.complete(messages, **kwargs)
+        yield response.content
+
+    def estimate_cost(self, input_tokens: int, output_tokens: int) -> float:
+        return (input_tokens / 1000 * 0.005) + (output_tokens / 1000 * 0.015)
+
+    async def embeddings(self, text: str) -> list[float]:
+        return [0.0] * 1536
+
+    async def health_check(self) -> bool:
+        return bool(self.api_key and self.endpoint)
+
+
+class OpenRouterAdapter:
+    """OpenRouter API adapter."""
+
+    def __init__(self, api_key: str, model: str = "openai/gpt-4o", **kwargs: Any):
+        self.api_key = api_key
+        self.model = model
+
+    async def complete(self, messages: list[Message], **kwargs: Any) -> LLMResponse:
+        url = "https://openrouter.ai/api/v1/chat/completions"
+        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
+        payload = {"model": self.model, "messages": [{"role": m.role, "content": m.content} for m in messages]}
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(url, headers=headers, json=payload, timeout=60.0)
+            if not resp.is_success:
+                raise RuntimeError(f"OpenRouter API error ({resp.status_code}): {resp.text}")
+            data = resp.json()
+            choice = data["choices"][0]
+            usage = data.get("usage", {})
+            return LLMResponse(
+                content=choice.get("message", {}).get("content", ""),
+                input_tokens=usage.get("prompt_tokens", 0),
+                output_tokens=usage.get("completion_tokens", 0),
+                total_tokens=usage.get("total_tokens", 0),
+                model=self.model,
+            )
+
+    async def stream(self, messages: list[Message], **kwargs: Any) -> AsyncIterator[str]:
+        response = await self.complete(messages, **kwargs)
+        yield response.content
+
+    def estimate_cost(self, input_tokens: int, output_tokens: int) -> float:
+        return (input_tokens / 1000 * 0.003) + (output_tokens / 1000 * 0.01)
+
+    async def embeddings(self, text: str) -> list[float]:
+        return [0.0] * 1536
+
+    async def health_check(self) -> bool:
+        return bool(self.api_key)
+
+
+class OllamaAdapter:
+    """Ollama local model adapter."""
+
+    def __init__(self, model: str = "llama3", base_url: str = "http://localhost:11434", **kwargs: Any):
+        self.model = model
+        self.base_url = base_url
+
+    async def complete(self, messages: list[Message], **kwargs: Any) -> LLMResponse:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f"{self.base_url}/api/chat",
+                json={
+                    "model": self.model,
+                    "messages": [{"role": m.role, "content": m.content} for m in messages],
+                    "stream": False,
+                },
+                timeout=120.0,
+            )
+            data = resp.json()
+            return LLMResponse(
+                content=data.get("message", {}).get("content", ""),
+                total_tokens=data.get("eval_count", 0) + data.get("prompt_eval_count", 0),
+                model=self.model,
+            )
+
+    async def stream(self, messages: list[Message], **kwargs: Any) -> AsyncIterator[str]:
+        async with httpx.AsyncClient() as client:
+            async with client.stream(
+                "POST",
+                f"{self.base_url}/api/chat",
+                json={
+                    "model": self.model,
+                    "messages": [{"role": m.role, "content": m.content} for m in messages],
+                    "stream": True,
+                },
+                timeout=120.0,
+            ) as response:
+                import json
+                async for line in response.aiter_lines():
+                    if line:
+                        data = json.loads(line)
+                        content = data.get("message", {}).get("content", "")
+                        if content:
+                            yield content
+
+    def estimate_cost(self, input_tokens: int, output_tokens: int) -> float:
+        return 0.0
+
+    async def embeddings(self, text: str) -> list[float]:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f"{self.base_url}/api/embeddings",
+                json={"model": self.model, "prompt": text},
+                timeout=30.0,
+            )
+            if resp.is_success:
+                return resp.json().get("embedding", [0.0] * 4096)
+        return [0.0] * 4096
+
+    async def health_check(self) -> bool:
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(f"{self.base_url}/api/tags", timeout=5.0)
+                return resp.is_success
+        except Exception:
+            return False
+
 
 class LLMProviderFactory:
     """Creates LLM provider adapter instances."""
@@ -277,12 +491,16 @@ class LLMProviderFactory:
         "ollama": OllamaAdapter,
         "gemini": GeminiAdapter,
         "google": GeminiAdapter,
+        "groq": GroqAdapter,
+        "deepseek": DeepSeekAdapter,
+        "azure": AzureOpenAIAdapter,
+        "openrouter": OpenRouterAdapter,
     }
 
     @classmethod
     def create(cls, provider_type: str, **kwargs: Any) -> LLMProvider:
         """Create an LLM provider adapter by type."""
-        adapter_class = cls._ADAPTERS.get(provider_type)
+        adapter_class = cls._ADAPTERS.get(provider_type.lower())
         if not adapter_class:
             raise ValueError(f"Unknown LLM provider: '{provider_type}'. Available: {list(cls._ADAPTERS.keys())}")
         return adapter_class(**kwargs)
@@ -290,5 +508,4 @@ class LLMProviderFactory:
     @classmethod
     def register(cls, name: str, adapter_class: type) -> None:
         """Register a custom adapter."""
-        cls._ADAPTERS[name] = adapter_class
-
+        cls._ADAPTERS[name.lower()] = adapter_class

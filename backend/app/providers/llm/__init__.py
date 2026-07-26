@@ -202,6 +202,68 @@ class OllamaAdapter:
         return 0.0  # Local models are free
 
 
+class GeminiAdapter:
+    """Google Gemini adapter (gemini-1.5-flash, gemini-1.5-pro, gemini-2.0-flash)."""
+
+    PRICING = {
+        "gemini-1.5-flash": (0.000075, 0.0003),
+        "gemini-1.5-pro": (0.00125, 0.005),
+        "gemini-2.0-flash": (0.0001, 0.0004),
+    }
+
+    def __init__(self, api_key: str, model: str = "gemini-1.5-flash", **kwargs: Any):
+        self.api_key = api_key
+        self.model = model
+
+    async def complete(self, messages: list[Message], **kwargs: Any) -> LLMResponse:
+        import httpx
+        system_instruction = None
+        contents = []
+        for m in messages:
+            if m.role == "system":
+                system_instruction = {"parts": [{"text": m.content}]}
+            else:
+                role = "user" if m.role == "user" else "model"
+                contents.append({"role": role, "parts": [{"text": m.content}]})
+
+        payload: dict[str, Any] = {"contents": contents}
+        if system_instruction:
+            payload["systemInstruction"] = system_instruction
+
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={self.api_key}"
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(url, json=payload, timeout=60.0)
+            if not resp.is_success:
+                raise RuntimeError(f"Gemini API error ({resp.status_code}): {resp.text}")
+            data = resp.json()
+
+            candidates = data.get("candidates", [])
+            text = ""
+            if candidates:
+                parts = candidates[0].get("content", {}).get("parts", [])
+                text = "".join(p.get("text", "") for p in parts)
+
+            usage = data.get("usageMetadata", {})
+            input_tokens = usage.get("promptTokenCount", 0)
+            output_tokens = usage.get("candidatesTokenCount", 0)
+
+            return LLMResponse(
+                content=text,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                total_tokens=input_tokens + output_tokens,
+                model=self.model,
+            )
+
+    async def stream(self, messages: list[Message], **kwargs: Any) -> AsyncIterator[str]:
+        response = await self.complete(messages, **kwargs)
+        yield response.content
+
+    def estimate_cost(self, input_tokens: int, output_tokens: int) -> float:
+        input_price, output_price = self.PRICING.get(self.model, (0.0001, 0.0004))
+        return (input_tokens / 1000 * input_price) + (output_tokens / 1000 * output_price)
+
+
 # ---------------------------------------------------------
 # Factory
 # ---------------------------------------------------------
@@ -213,6 +275,8 @@ class LLMProviderFactory:
         "openai": OpenAIAdapter,
         "anthropic": AnthropicAdapter,
         "ollama": OllamaAdapter,
+        "gemini": GeminiAdapter,
+        "google": GeminiAdapter,
     }
 
     @classmethod
@@ -227,3 +291,4 @@ class LLMProviderFactory:
     def register(cls, name: str, adapter_class: type) -> None:
         """Register a custom adapter."""
         cls._ADAPTERS[name] = adapter_class
+

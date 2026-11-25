@@ -216,7 +216,7 @@ export default function EvaluationsPage() {
   const [showModal, setShowModal] = useState(false);
 
   // Modal State
-  const [targetUrl, setTargetUrl] = useState('http://localhost:8000/api/v1/demo/chatbot');
+  const [targetUrl, setTargetUrl] = useState(`${API_BASE}/demo/chatbot`);
   const [selectedSuiteId, setSelectedSuiteId] = useState<string>('');
   const [customQuestion, setCustomQuestion] = useState('');
   const [isRunning, setIsRunning] = useState(false);

@@ -185,6 +185,17 @@ class Settings(BaseSettings):
     def is_testing(self) -> bool:
         return self.celery_task_always_eager
 
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def normalize_database_url(cls, v: Any) -> str:
+        if isinstance(v, str):
+            v_str = v.strip()
+            if v_str.startswith("postgres://"):
+                return v_str.replace("postgres://", "postgresql+asyncpg://", 1)
+            if v_str.startswith("postgresql://") and "+asyncpg" not in v_str:
+                return v_str.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return v
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def parse_cors_origins(cls, v: Any) -> list[str]:

@@ -89,6 +89,7 @@ class EvaluationService:
         # Dispatch Celery background task without blocking async loop
         import asyncio
         from app.workers.celery_app import celery_app
+        run_in_process_fallback = False
         try:
             task = await asyncio.to_thread(
                 celery_app.send_task,
@@ -99,8 +100,12 @@ class EvaluationService:
         except Exception as err:
             logger.warning("celery_dispatch_failed_fallback_local", error=str(err))
             evaluation.celery_task_id = str(uuid.uuid4())
+            run_in_process_fallback = True
 
         await self.db.commit()
+        if run_in_process_fallback:
+            from app.workers.tasks.evaluation_tasks import _run_benchmark_async
+            asyncio.create_task(_run_benchmark_async(str(evaluation.id)))
         logger.info("evaluation_run_dispatched", eval_id=str(evaluation.id))
         return evaluation
 

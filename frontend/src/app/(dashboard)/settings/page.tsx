@@ -10,7 +10,7 @@ export default function SettingsPage() {
   // Gemini API Key state
   const [geminiKey, setGeminiKey] = useState('');
   const [testingGemini, setTestingGemini] = useState(false);
-  const [geminiStatus, setGeminiStatus] = useState<{ success: boolean; message: str; model?: str } | null>(null);
+  const [geminiStatus, setGeminiStatus] = useState<{ success: boolean; message: string; model?: string } | null>(null);
 
   const handleCopyKey = () => {
     navigator.clipboard.writeText('rge_live_892348a9f8e7123c89a0b');

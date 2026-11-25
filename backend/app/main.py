@@ -57,9 +57,22 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from app.database.base import Base
     import app.models  # noqa: F401
 
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    logger.info("database_connected")
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        logger.info("database_connected")
+    except Exception as db_err:
+        logger.warning("database_connection_fallback_sqlite", error=str(db_err))
+        import app.database.session as db_session
+        from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession, create_async_engine
+        fallback_engine = create_async_engine("sqlite+aiosqlite:///./rageval.db", echo=False)
+        db_session.engine = fallback_engine
+        db_session.async_session_factory = async_sessionmaker(
+            fallback_engine, class_=AsyncSession, expire_on_commit=False, autocommit=False, autoflush=False
+        )
+        async with fallback_engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        logger.info("sqlite_fallback_database_connected")
 
     from app.core.redis import redis_client
     try:
@@ -152,7 +165,7 @@ def _configure_middleware(app: FastAPI, settings: "Settings") -> None:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins if isinstance(settings.cors_origins, list) else [settings.cors_origins],
-        allow_origin_regex=r"http://(localhost|127\.0\.0\.1)(:\d+)?" if settings.is_development else None,
+        allow_origin_regex=r"https?://(localhost|127\.0\.0\.1|.*\.(railway\.app|up\.railway\.app|vercel\.app|onrender\.com))(:\d+)?",
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

@@ -27,7 +27,7 @@ FROM base AS production
 ENV NODE_ENV=production
 
 COPY package*.json ./
-RUN npm install --legacy-peer-deps --only=production
+RUN npm install --legacy-peer-deps
 
 COPY . .
 RUN npm run build

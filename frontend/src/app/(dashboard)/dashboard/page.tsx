@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import Link from 'next/link';
 import {
   ShieldCheck,
   AlertTriangle,
@@ -50,12 +51,18 @@ export default function DashboardPage() {
           <p className="text-sm text-gray-400 mt-1">Real-time benchmarks across accuracy, hallucination, latency, and prompt injection defense.</p>
         </div>
         <div className="flex items-center space-x-3">
-          <button className="px-4 py-2 rounded-xl text-xs font-medium bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700 transition-all">
+          <Link
+            href="/reports"
+            className="px-4 py-2 rounded-xl text-xs font-medium bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700 transition-all"
+          >
             Export Audit Report
-          </button>
-          <button className="px-4 py-2 rounded-xl text-xs font-semibold bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-lg shadow-blue-500/25 transition-all">
+          </Link>
+          <Link
+            href="/evaluations"
+            className="px-4 py-2 rounded-xl text-xs font-semibold bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-lg shadow-blue-500/25 transition-all"
+          >
             + Run Benchmark Suite
-          </button>
+          </Link>
         </div>
       </div>
 
@@ -201,9 +208,9 @@ export default function DashboardPage() {
             <h2 className="text-base font-semibold text-white">Recent Benchmark Executions</h2>
             <p className="text-xs text-gray-400">Automated evaluation runs across configured project pipelines</p>
           </div>
-          <button className="text-xs text-blue-400 hover:text-blue-300 font-medium flex items-center">
+          <Link href="/evaluations" className="text-xs text-blue-400 hover:text-blue-300 font-medium flex items-center">
             View All Runs <ArrowUpRight className="w-3.5 h-3.5 ml-1" />
-          </button>
+          </Link>
         </div>
 
         <div className="overflow-x-auto">
@@ -249,3 +256,4 @@ export default function DashboardPage() {
     </div>
   );
 }
+

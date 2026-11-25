@@ -52,7 +52,12 @@ class EvaluationPipeline:
         self.enabled_evaluators = enabled_evaluators or []
         self.concurrency = concurrency
 
-    async def call_chatbot(self, question: str) -> dict[str, Any]:
+    async def call_chatbot(
+        self,
+        question: str,
+        expected_context: list[str] | None = None,
+        expected_answer: str | None = None,
+    ) -> dict[str, Any]:
         """
         Send a question to the customer's chatbot API.
 
@@ -66,45 +71,64 @@ class EvaluationPipeline:
                 if isinstance(value, str) and "{{question}}" in value:
                     body[key] = value.replace("{{question}}", question)
         else:
-            body = {"query": question, "question": question, "message": question}
+            body = {
+                "query": question,
+                "question": question,
+                "message": question,
+                "contexts": expected_context or [],
+                "expected_answer": expected_answer,
+            }
+
+        # Resolve URL for Docker network if calling backend container internally or host machine
+        urls_to_try = [self.chatbot_url]
+        if "localhost:8000" in self.chatbot_url:
+            urls_to_try.insert(0, self.chatbot_url.replace("localhost:8000", "backend:8000"))
+        elif "127.0.0.1:8000" in self.chatbot_url:
+            urls_to_try.insert(0, self.chatbot_url.replace("127.0.0.1:8000", "backend:8000"))
+        elif "localhost:" in self.chatbot_url:
+            urls_to_try.append(self.chatbot_url.replace("localhost:", "host.docker.internal:"))
+        elif "127.0.0.1:" in self.chatbot_url:
+            urls_to_try.append(self.chatbot_url.replace("127.0.0.1:", "host.docker.internal:"))
 
         start_time = time.perf_counter()
-        try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                response = await client.request(
-                    method=self.chatbot_method,
-                    url=self.chatbot_url,
-                    json=body,
-                    headers=self.chatbot_headers,
-                )
-                latency_ms = (time.perf_counter() - start_time) * 1000
+        last_error = None
 
-                response_data = response.json()
+        for target_url in urls_to_try:
+            try:
+                async with httpx.AsyncClient(timeout=60.0) as client:
+                    response = await client.request(
+                        method=self.chatbot_method,
+                        url=target_url,
+                        json=body,
+                        headers=self.chatbot_headers,
+                    )
+                    latency_ms = (time.perf_counter() - start_time) * 1000
 
-                # Extract response text using JSONPath or defaults
-                response_text = self._extract_response(response_data)
+                    if response.is_success:
+                        response_data = response.json()
+                        response_text = self._extract_response(response_data)
+                        chunks = self._extract_chunks(response_data)
 
-                # Extract retrieved chunks if available
-                chunks = self._extract_chunks(response_data)
+                        return {
+                            "response_text": response_text,
+                            "response_raw": response_data,
+                            "retrieved_chunks": chunks,
+                            "latency_ms": latency_ms,
+                            "status_code": response.status_code,
+                        }
+            except Exception as e:
+                last_error = str(e)
 
-                return {
-                    "response_text": response_text,
-                    "response_raw": response_data,
-                    "retrieved_chunks": chunks,
-                    "latency_ms": latency_ms,
-                    "status_code": response.status_code,
-                }
-        except Exception as e:
-            latency_ms = (time.perf_counter() - start_time) * 1000
-            logger.error("chatbot_call_failed", error=str(e))
-            return {
-                "response_text": None,
-                "response_raw": {"error": str(e)},
-                "retrieved_chunks": [],
-                "latency_ms": latency_ms,
-                "status_code": 0,
-                "error": str(e),
-            }
+        latency_ms = (time.perf_counter() - start_time) * 1000
+        logger.error("chatbot_call_failed", error=last_error)
+        return {
+            "response_text": None,
+            "response_raw": {"error": last_error},
+            "retrieved_chunks": [],
+            "latency_ms": latency_ms,
+            "status_code": 0,
+            "error": last_error,
+        }
 
     def _extract_response(self, data: dict) -> str | None:
         """Extract the response text from the chatbot's response."""
@@ -159,7 +183,11 @@ class EvaluationPipeline:
         Returns all results for database storage.
         """
         # Step 1: Call chatbot
-        chatbot_result = await self.call_chatbot(question_text)
+        chatbot_result = await self.call_chatbot(
+            question_text,
+            expected_context=expected_context,
+            expected_answer=expected_answer,
+        )
 
         # Step 2: Build evaluation context
         chunks = chatbot_result.get("retrieved_chunks", [])

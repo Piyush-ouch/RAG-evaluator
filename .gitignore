@@ -76,6 +76,7 @@ docker-data/
 *.pyo
 *.db
 *.sqlite3
+celerybeat-schedule*
 staticfiles/
 mediafiles/
 uploads/

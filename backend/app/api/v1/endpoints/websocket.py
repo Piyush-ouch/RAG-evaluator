@@ -35,6 +35,9 @@ async def evaluation_progress_websocket(websocket: WebSocket, job_id: str) -> No
     pubsub = None
 
     try:
+        if not redis_client._client:
+            await redis_client.initialize()
+
         if redis_client._client:
             pubsub = redis_client._client.pubsub()
             await pubsub.subscribe(channel_name)

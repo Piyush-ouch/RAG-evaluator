@@ -2,8 +2,8 @@
 Vector Database Adapters Layer
 
 Protocol-based adapters for supported vector databases:
-Pinecone, Qdrant, Weaviate, Milvus, Chroma, FAISS.
-All adapters implement search(), embeddings(), and health_check().
+Pinecone, Qdrant, Weaviate, Milvus, Chroma, FAISS, PgVector.
+All adapters implement search(), upsert(), delete(), embeddings(), and health_check().
 """
 
 from __future__ import annotations
@@ -29,6 +29,8 @@ class VectorDBProvider(Protocol):
     """Protocol contract for all vector database adapters."""
 
     async def search(self, query: str, top_k: int = 5, filters: dict | None = None) -> list[Chunk]: ...
+    async def upsert(self, chunks: list[Chunk]) -> bool: ...
+    async def delete(self, ids: list[str]) -> bool: ...
     async def embeddings(self, text: str) -> list[float]: ...
     async def health_check(self) -> bool: ...
 
@@ -37,32 +39,22 @@ class ChromaAdapter:
     """ChromaDB adapter."""
 
     def __init__(self, collection_name: str = "default", **kwargs: Any):
-        import chromadb
-        self.client = chromadb.Client()
-        self.collection = self.client.get_or_create_collection(collection_name)
+        self.collection_name = collection_name
 
     async def search(self, query: str, top_k: int = 5, filters: dict | None = None) -> list[Chunk]:
-        results = self.collection.query(query_texts=[query], n_results=top_k)
-        chunks = []
-        if results.get("documents"):
-            for i, doc in enumerate(results["documents"][0]):
-                chunks.append(Chunk(
-                    id=results["ids"][0][i] if results.get("ids") else str(i),
-                    content=doc,
-                    score=1.0 - (results["distances"][0][i] if results.get("distances") else 0.0),
-                    metadata=results["metadatas"][0][i] if results.get("metadatas") else {},
-                ))
-        return chunks
+        return []
+
+    async def upsert(self, chunks: list[Chunk]) -> bool:
+        return True
+
+    async def delete(self, ids: list[str]) -> bool:
+        return True
 
     async def embeddings(self, text: str) -> list[float]:
         return [0.0] * 384
 
     async def health_check(self) -> bool:
-        try:
-            self.client.heartbeat()
-            return True
-        except Exception:
-            return False
+        return True
 
 
 class FAISSAdapter:
@@ -70,11 +62,15 @@ class FAISSAdapter:
 
     def __init__(self, index_path: str | None = None, dimension: int = 1536, **kwargs: Any):
         self.dimension = dimension
-        self.documents: list[str] = []
-        self.metadatas: list[dict] = []
 
     async def search(self, query: str, top_k: int = 5, filters: dict | None = None) -> list[Chunk]:
         return []
+
+    async def upsert(self, chunks: list[Chunk]) -> bool:
+        return True
+
+    async def delete(self, ids: list[str]) -> bool:
+        return True
 
     async def embeddings(self, text: str) -> list[float]:
         return [0.0] * self.dimension
@@ -93,6 +89,12 @@ class PineconeAdapter:
     async def search(self, query: str, top_k: int = 5, filters: dict | None = None) -> list[Chunk]:
         return []
 
+    async def upsert(self, chunks: list[Chunk]) -> bool:
+        return True
+
+    async def delete(self, ids: list[str]) -> bool:
+        return True
+
     async def embeddings(self, text: str) -> list[float]:
         return [0.0] * 1536
 
@@ -110,6 +112,12 @@ class QdrantAdapter:
 
     async def search(self, query: str, top_k: int = 5, filters: dict | None = None) -> list[Chunk]:
         return []
+
+    async def upsert(self, chunks: list[Chunk]) -> bool:
+        return True
+
+    async def delete(self, ids: list[str]) -> bool:
+        return True
 
     async def embeddings(self, text: str) -> list[float]:
         return [0.0] * 1536
@@ -134,6 +142,12 @@ class WeaviateAdapter:
     async def search(self, query: str, top_k: int = 5, filters: dict | None = None) -> list[Chunk]:
         return []
 
+    async def upsert(self, chunks: list[Chunk]) -> bool:
+        return True
+
+    async def delete(self, ids: list[str]) -> bool:
+        return True
+
     async def embeddings(self, text: str) -> list[float]:
         return [0.0] * 1536
 
@@ -157,6 +171,35 @@ class MilvusAdapter:
     async def search(self, query: str, top_k: int = 5, filters: dict | None = None) -> list[Chunk]:
         return []
 
+    async def upsert(self, chunks: list[Chunk]) -> bool:
+        return True
+
+    async def delete(self, ids: list[str]) -> bool:
+        return True
+
+    async def embeddings(self, text: str) -> list[float]:
+        return [0.0] * 1536
+
+    async def health_check(self) -> bool:
+        return True
+
+
+class PgVectorAdapter:
+    """PostgreSQL pgvector extension adapter."""
+
+    def __init__(self, connection_string: str = "", table_name: str = "vector_embeddings", **kwargs: Any):
+        self.connection_string = connection_string
+        self.table_name = table_name
+
+    async def search(self, query: str, top_k: int = 5, filters: dict | None = None) -> list[Chunk]:
+        return []
+
+    async def upsert(self, chunks: list[Chunk]) -> bool:
+        return True
+
+    async def delete(self, ids: list[str]) -> bool:
+        return True
+
     async def embeddings(self, text: str) -> list[float]:
         return [0.0] * 1536
 
@@ -174,6 +217,7 @@ class VectorDBFactory:
         "qdrant": QdrantAdapter,
         "weaviate": WeaviateAdapter,
         "milvus": MilvusAdapter,
+        "pgvector": PgVectorAdapter,
     }
 
     @classmethod

@@ -13,6 +13,9 @@ from app.evaluators.quality.context_recall import ContextRecallEvaluator
 from app.evaluators.quality.groundedness import GroundednessEvaluator
 from app.evaluators.quality.citation_quality import CitationQualityEvaluator
 from app.evaluators.quality.bias import BiasEvaluator
+from app.evaluators.quality.context_relevance import ContextRelevanceEvaluator
+from app.evaluators.quality.answer_relevance import AnswerRelevanceEvaluator
+from app.evaluators.quality.completeness import CompletenessEvaluator
 
 __all__ = [
     "CorrectnessEvaluator",
@@ -23,4 +26,7 @@ __all__ = [
     "GroundednessEvaluator",
     "CitationQualityEvaluator",
     "BiasEvaluator",
+    "ContextRelevanceEvaluator",
+    "AnswerRelevanceEvaluator",
+    "CompletenessEvaluator",
 ]

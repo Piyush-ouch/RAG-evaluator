@@ -1,7 +1,7 @@
 """
 Celery Application Configuration
 
-Configures Celery with Redis broker, task routing, and serialization.
+Configures Celery with Redis broker, task routing, and explicit task module imports.
 """
 
 from __future__ import annotations
@@ -19,6 +19,12 @@ celery_app = Celery(
 )
 
 celery_app.conf.update(
+    # Explicit task imports so worker registers run_benchmark and report tasks
+    imports=[
+        "app.workers.tasks.evaluation_tasks",
+        "app.workers.tasks.report_tasks",
+    ],
+
     # Serialization
     task_serializer="json",
     accept_content=["json"],

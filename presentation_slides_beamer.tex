@@ -1,0 +1,132 @@
+\documentclass[aspectratio=169, 10pt]{beamer}
+\usetheme{Madrid}
+\usecolortheme{default}
+
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{tikz}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+\usetikzlibrary{arrows.meta, positioning}
+
+\title[RAGEval-Sandbox]{RAGEval-Sandbox: Unified RAG Benchmarking and Guardrail Evaluation}
+\author{Piyush \and RAG Evaluator Research Team}
+\institute{Department of Computer Science and Engineering}
+\date{\today}
+
+\begin{document}
+
+% Slide 1: Title
+\begin{frame}
+    \titlepage
+\end{frame}
+
+% Slide 2: Motivation & Problem Statement
+\begin{frame}{Motivation \& Problem Statement}
+    \textbf{Why Enterprise RAG Evaluation is Currently Broken:}
+    \begin{itemize}
+        \item \textbf{Silo 1 — Quality-Only Evaluators:} Tools like \textit{RAGAS}, \textit{ARES}, and \textit{RAGBench} measure faithfulness and context recall, but ignore adversarial prompt injection, jailbreaks, and PII exfiltration.
+        \item \textbf{Silo 2 — Standalone Safety Filters:} Runtime rails like \textit{NeMo Guardrails} and \textit{Llama Guard} filter dialogue, but do not benchmark multi-hop retrieval accuracy, citations, or version regressions.
+        \item \textbf{Silo 3 — Unchecked CI/CD Regressions:} A prompt or retriever change that boosts completeness on IT tickets (+6\%) can silently spike hallucinations on financial filings (+9\%) or open a prompt leakage vulnerability.
+    \end{itemize}
+    \vspace{0.2cm}
+    \begin{block}{Research Goal}
+        Design a unified, black-box asynchronous sandbox that jointly evaluates \textbf{RAG Quality (11 metrics)}, \textbf{Adversarial Guardrails (10 vectors)}, and \textbf{Cost/Latency CI/CD Gates (2 metrics)}.
+    \end{block}
+\end{frame}
+
+% Slide 3: Key Contributions
+\begin{frame}{Core Contributions of RAGEval-Sandbox}
+    \begin{enumerate}
+        \item \textbf{23-Evaluator Self-Registering Plugin Architecture (\texttt{@register\_evaluator}):}
+        \begin{itemize}
+            \item \textbf{11 Quality Evaluators:} Faithfulness, Sentence Groundedness, Extrinsic Hallucination, Rank-Aware Context Precision/Recall/Relevance, Correctness, Completeness, Answer Relevance, Citations, and Bias.
+            \item \textbf{10 Refusal-Aware Security Evaluators:} Direct/Indirect Prompt Injection, Delimiter Override, DAN Jailbreak, System Prompt Leakage, PII \& Secret Exfiltration, Role Escalation, Tool Misuse, I/O Validation, Toxicity.
+            \item \textbf{2 Performance Evaluators:} Tail Latency ($p_{50}, p_{95}, p_{99}$) and Provider-Aware Token Cost.
+        \end{itemize}
+        \item \textbf{Fault-Tolerant Multi-Domain \texttt{RAGBench} Streaming Engine:}
+        \begin{itemize}
+            \item Native streaming for \texttt{FinQA}, \texttt{TAT-QA}, \texttt{PubMedQA}, \texttt{TechQA}, and \texttt{HotpotQA} with SHA-256 deduplication and air-gapped offline fallbacks.
+        \end{itemize}
+        \item \textbf{Automated CI/CD Regression Quality Gate (\texttt{RegressionService}):}
+        \begin{itemize}
+            \item Automatically blocks candidate releases if $\Delta_{\text{halluc}} > +5\%$ or $\Delta_{\text{sec}} < -5\%$.
+        \end{itemize}
+    \end{enumerate}
+\end{frame}
+
+% Slide 4: Mathematical Formulation Highlights
+\begin{frame}{Mathematical Formulation Highlights}
+    \begin{columns}[T]
+        \begin{column}{0.48\textwidth}
+            \textbf{1. Boosted Faithfulness \& Groundedness}
+            \[
+                S_{\text{faith}} = \min\left(1.0, \; 1.2 \cdot \frac{|T(r_i) \cap T(C_i)|}{|T(r_i)|}\right)
+            \]
+            \[
+                S_{\text{ground}} = \frac{1}{L} \sum_{l=1}^{L} \mathbb{I}\left( \frac{|T(s_l) \cap T(C_i)|}{|T(s_l)|} \ge 0.30 \right)
+            \]
+            \textbf{2. Rank-Aware Context Precision}
+            \[
+                S_{\text{c-prec}} = \frac{\sum_{j=1}^{m} \frac{1}{j} \cdot \text{rel}(c_{i,j}, q_i)}{\sum_{j=1}^{m} \frac{1}{j}}
+            \]
+        \end{column}
+        \begin{column}{0.48\textwidth}
+            \textbf{3. Refusal-Aware Security Scoring}
+            \begin{itemize}
+                \item Prevents false alarms when an attack prompt is safely declined ($\mathcal{R}_{\text{refuse}}$):
+            \end{itemize}
+            \[
+                S_e(q_i, r_i) = \begin{cases}
+                1.0, & \text{if no attack indicator} \\
+                1.0, & \text{if attack } \land r_i \in \mathcal{R}_{\text{refuse}} \\
+                0.0, & \text{otherwise (Breached)}
+                \end{cases}
+            \]
+            \begin{itemize}
+                \item Reduces security false-positive alarms from \textbf{28.5\% down to 3.6\%}.
+            \end{itemize}
+        \end{column}
+    \end{columns}
+\end{frame}
+
+% Slide 5: Experimental Results
+\begin{frame}{Experimental Results Across Providers \& Attack Vectors}
+    \begin{table}
+        \centering
+        \caption{Cross-Provider RAG Quality, Security, Latency, and Token Cost ($N=200$ Queries)}
+        \footnotesize
+        \begin{tabular}{l c c c c c c}
+            \toprule
+            \textbf{LLM Backend} & \textbf{Faith.} $\uparrow$ & \textbf{Corr.} $\uparrow$ & \textbf{Halluc.} $\downarrow$ & \textbf{Sec. Score} $\uparrow$ & \textbf{$p_{95}$ Lat.} $\downarrow$ & \textbf{Cost / Run} $\downarrow$ \\
+            \midrule
+            GPT-4o (OpenAI) & 0.874 & \textbf{0.836} & 6.8\% & 0.945 & 1,420 ms & \$0.382 \\
+            Claude 3.5 Sonnet & \textbf{0.891} & 0.831 & \textbf{5.2\%} & \textbf{0.972} & 1,580 ms & \$0.415 \\
+            Gemini 1.5 Pro & 0.862 & 0.819 & 7.5\% & 0.938 & 1,310 ms & \$0.264 \\
+            Llama-3.1-70B (Groq) & 0.829 & 0.788 & 10.4\% & 0.884 & \textbf{390 ms} & \textbf{\$0.048} \\
+            \bottomrule
+        \end{tabular}
+    \end{table}
+    \vspace{0.1cm}
+    \begin{itemize}
+        \item \textbf{Adversarial Detection Accuracy:} \textbf{96.4\%} across 60 red-team attack payloads ($<1.8\text{ ms}$ overhead/query).
+        \item \textbf{Asynchronous Speedup:} Scaling \texttt{asyncio.Semaphore(k)} from $k=1$ to $k=10$ achieves a \textbf{7.75$\times$ speedup} ($242.0\text{ s} \rightarrow 31.2\text{ s}$) across $4,600$ evaluator executions.
+    \end{itemize}
+\end{frame}
+
+% Slide 6: Conclusion
+\begin{frame}{Conclusion \& Future Scope}
+    \begin{itemize}
+        \item \textbf{Unified Assurance:} RAGEval-Sandbox bridges offline multi-domain RAG benchmarking (\texttt{RAGBench}) with automated adversarial guardrail red-teaming and CI/CD regression quality gates.
+        \item \textbf{Zero-Cost First-Pass Gating:} Deterministic lexical, rank-aware, and regex evaluators enable sub-minute pull-request gating at \$0.00 judge cost.
+        \item \textbf{Future Directions:}
+        \begin{enumerate}
+            \item Multi-turn agentic RAG trajectory evaluation.
+            \item Multimodal PDF table and chart grounding verification.
+            \item Prediction-Powered Inference (PPI) calibration with lightweight NLI cross-encoders.
+        \end{enumerate}
+    \end{itemize}
+\end{frame}
+
+\end{document}
+

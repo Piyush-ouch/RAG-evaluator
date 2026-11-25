@@ -8,13 +8,14 @@ import uuid
 
 import structlog
 from fastapi import APIRouter, Depends, UploadFile, File
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
-from app.api.deps import CurrentUser, DbSession, Pagination, require_role
+from app.api.deps import CurrentUser, DbSession, OptionalUser, Pagination, require_role
 from app.core.constants import UserRole
 from app.core.exceptions import NotFoundError
 from app.models.benchmark import BenchmarkSuite, Question
 from app.schemas.evaluation import (
+    BenchmarkImportRequest,
     BenchmarkSuiteCreate,
     BenchmarkSuiteResponse,
     QuestionCreate,
@@ -28,13 +29,19 @@ router = APIRouter(prefix="/benchmarks", tags=["Benchmarks"])
 @router.get("/", response_model=list[BenchmarkSuiteResponse])
 async def list_benchmark_suites(
     db: DbSession,
-    current_user: CurrentUser,
+    current_user: OptionalUser,
     project_id: uuid.UUID | None = None,
 ) -> list[BenchmarkSuiteResponse]:
-    """List benchmark suites."""
-    stmt = select(BenchmarkSuite).where(
-        BenchmarkSuite.org_id == current_user.org_id,
-    )
+    """List benchmark suites (includes built-in templates and RAGBench suites)."""
+    stmt = select(BenchmarkSuite)
+    if current_user:
+        stmt = stmt.where(
+            or_(
+                BenchmarkSuite.org_id == current_user.org_id,
+                BenchmarkSuite.is_template == True,  # noqa: E712
+                BenchmarkSuite.source_dataset == "ragbench",
+            )
+        )
     if project_id:
         stmt = stmt.where(BenchmarkSuite.project_id == project_id)
     stmt = stmt.order_by(BenchmarkSuite.created_at.desc())
@@ -68,18 +75,70 @@ async def create_benchmark_suite(
 async def get_benchmark_suite(
     suite_id: uuid.UUID,
     db: DbSession,
-    current_user: CurrentUser,
+    current_user: OptionalUser,
 ) -> BenchmarkSuiteResponse:
     """Get benchmark suite details."""
-    stmt = select(BenchmarkSuite).where(
-        BenchmarkSuite.id == suite_id,
-        BenchmarkSuite.org_id == current_user.org_id,
-    )
+    stmt = select(BenchmarkSuite).where(BenchmarkSuite.id == suite_id)
+    if current_user:
+        stmt = stmt.where(
+            or_(
+                BenchmarkSuite.org_id == current_user.org_id,
+                BenchmarkSuite.is_template == True,  # noqa: E712
+                BenchmarkSuite.source_dataset == "ragbench",
+            )
+        )
     result = await db.execute(stmt)
     suite = result.scalar_one_or_none()
     if not suite:
         raise NotFoundError("BenchmarkSuite", str(suite_id))
     return BenchmarkSuiteResponse.model_validate(suite, from_attributes=True)
+
+
+@router.get("/{suite_id}/questions", response_model=list[QuestionResponse])
+async def get_suite_questions(
+    suite_id: uuid.UUID,
+    db: DbSession,
+    current_user: OptionalUser,
+    limit: int = 100,
+    offset: int = 0,
+) -> list[QuestionResponse]:
+    """Get questions for a specific benchmark suite."""
+    suite_stmt = select(BenchmarkSuite).where(BenchmarkSuite.id == suite_id)
+    suite_res = await db.execute(suite_stmt)
+    suite = suite_res.scalar_one_or_none()
+    if not suite:
+        raise NotFoundError("BenchmarkSuite", str(suite_id))
+
+    stmt = (
+        select(Question)
+        .where(Question.suite_id == suite_id)
+        .order_by(Question.order_index)
+        .limit(limit)
+        .offset(offset)
+    )
+    result = await db.execute(stmt)
+    questions = result.scalars().all()
+    return [QuestionResponse.model_validate(q, from_attributes=True) for q in questions]
+
+
+@router.post("/import", status_code=201)
+async def import_ragbench(
+    request: BenchmarkImportRequest,
+    db: DbSession,
+    current_user: OptionalUser,
+) -> dict:
+    """Import RAGBench dataset subsets into PostgreSQL."""
+    from app.benchmark.service import RAGBenchImportService
+
+    service = RAGBenchImportService(db)
+    org_id = current_user.org_id if current_user else None
+    res = await service.import_all_subsets(
+        subsets=request.subsets,
+        split=request.split,
+        limit_per_subset=request.limit_per_subset,
+        org_id=org_id,
+    )
+    return res
 
 
 @router.post("/{suite_id}/questions", response_model=list[QuestionResponse], status_code=201)

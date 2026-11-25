@@ -61,14 +61,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await conn.run_sync(Base.metadata.create_all)
     logger.info("database_connected")
 
-
     from app.core.redis import redis_client
-    await redis_client.initialize()
-    logger.info("redis_connected")
+    try:
+        await redis_client.initialize()
+        logger.info("redis_connected")
+    except Exception as err:
+        logger.warning("redis_connection_warning", error=str(err))
 
     from app.core.storage import storage_client
-    await storage_client.ensure_bucket()
-    logger.info("s3_connected", bucket=settings.s3_bucket_name)
+    try:
+        await storage_client.ensure_bucket()
+        logger.info("s3_connected", bucket=settings.s3_bucket_name)
+    except Exception as err:
+        logger.warning("s3_connection_warning", error=str(err))
 
     logger.info("application_started")
 
@@ -77,7 +82,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # --- Shutdown ---
     logger.info("application_shutting_down")
     await engine.dispose()
-    await redis_client.close()
+    try:
+        await redis_client.close()
+    except Exception:
+        pass
     logger.info("application_stopped")
 
 
@@ -148,7 +156,7 @@ def _configure_middleware(app: FastAPI, settings: "Settings") -> None:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
-        expose_headers=["X-Request-ID", "X-Process-Time"],
+        expose_headers=["X-Request-ID", "X-Process-Time", "Content-Disposition"],
     )
 
     if settings.is_production:

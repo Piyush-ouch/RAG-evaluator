@@ -10,6 +10,7 @@ from typing import Any
 import structlog
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 
 from app.api.deps import CurrentUser, DbSession, OptionalUser, Pagination, require_role
 from app.core.constants import UserRole
@@ -123,12 +124,24 @@ async def quick_start_evaluation(
 @router.get("/", response_model=list[EvaluationResponse])
 async def list_evaluations(
     db: DbSession,
-    current_user: CurrentUser,
+    current_user: OptionalUser,
     project_id: uuid.UUID | None = None,
 ) -> list[EvaluationResponse]:
-    """List evaluations for the organization."""
+    """List evaluations for the organization (supports unauthenticated demo mode)."""
     svc = EvaluationService(db)
-    evaluations = await svc.list_evaluations(current_user.org_id, project_id)
+    if current_user:
+        org_id = current_user.org_id
+    else:
+        from app.models.organization import Organization
+        org_stmt = select(Organization).limit(1)
+        org_res = await db.execute(org_stmt)
+        existing_org = org_res.scalar_one_or_none()
+        if existing_org:
+            org_id = existing_org.id
+        else:
+            return []
+
+    evaluations = await svc.list_evaluations(org_id, project_id)
     return [EvaluationResponse.model_validate(e, from_attributes=True) for e in evaluations]
 
 

@@ -174,15 +174,19 @@ class AnthropicAdapter:
 
 
 class GeminiAdapter:
-    """Google Gemini adapter (gemini-1.5-flash, gemini-1.5-pro, gemini-2.0-flash)."""
+    """Google Gemini adapter (gemini-3.5-flash-lite, gemini-3.8-flash, gemma-4-26b-a4b-it, gemma-4-31b-it)."""
 
     PRICING = {
+        "gemini-3.5-flash-lite": (0.000075, 0.0003),
+        "gemini-3.8-flash": (0.0001, 0.0004),
+        "gemma-4-26b-a4b-it": (0.00005, 0.0002),
+        "gemma-4-31b-it": (0.000075, 0.0003),
         "gemini-1.5-flash": (0.000075, 0.0003),
         "gemini-1.5-pro": (0.00125, 0.005),
         "gemini-2.0-flash": (0.0001, 0.0004),
     }
 
-    def __init__(self, api_key: str, model: str = "gemini-1.5-flash", **kwargs: Any):
+    def __init__(self, api_key: str, model: str = "gemini-3.5-flash-lite", **kwargs: Any):
         self.api_key = api_key
         self.model = model
 
@@ -211,7 +215,8 @@ class GeminiAdapter:
             text = ""
             if candidates:
                 parts = candidates[0].get("content", {}).get("parts", [])
-                text = "".join(p.get("text", "") for p in parts)
+                non_thought_parts = [p.get("text", "") for p in parts if not p.get("thought")]
+                text = "".join(non_thought_parts) if non_thought_parts else "".join(p.get("text", "") for p in parts)
 
             usage = data.get("usageMetadata", {})
             input_tokens = usage.get("promptTokenCount", 0)

@@ -13,6 +13,9 @@ from app.evaluators.security.prompt_leakage import PromptLeakageDetector
 from app.evaluators.security.secret_detection import SecretDetectionEvaluator
 from app.evaluators.security.tool_misuse import ToolMisuseEvaluator
 from app.evaluators.security.policy_compliance import PolicyComplianceEvaluator
+from app.evaluators.security.role_escalation import RoleEscalationEvaluator
+from app.evaluators.security.input_validation import InputValidationEvaluator
+from app.evaluators.security.output_validation import OutputValidationEvaluator
 
 __all__ = [
     "PromptInjectionChecker",
@@ -23,4 +26,7 @@ __all__ = [
     "SecretDetectionEvaluator",
     "ToolMisuseEvaluator",
     "PolicyComplianceEvaluator",
+    "RoleEscalationEvaluator",
+    "InputValidationEvaluator",
+    "OutputValidationEvaluator",
 ]

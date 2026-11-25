@@ -43,7 +43,9 @@ class StorageClient:
                 "aws_secret_access_key": settings.s3_secret_access_key,
                 "config": BotoConfig(
                     signature_version="s3v4",
-                    retries={"max_attempts": 3, "mode": "adaptive"},
+                    retries={"max_attempts": 1, "mode": "standard"},
+                    connect_timeout=2,
+                    read_timeout=2,
                 ),
             }
             # MinIO requires explicit endpoint_url; AWS S3 does not

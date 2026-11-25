@@ -32,6 +32,8 @@ async def _publish_progress(redis_client, channel: str, message_data: dict) -> N
     """Publish evaluation progress message to Redis pub/sub channel."""
     try:
         if redis_client:
+            if not redis_client._client:
+                await redis_client.initialize()
             await redis_client.publish(channel, json.dumps(message_data))
     except Exception as err:
         logger.warning("redis_publish_failed", channel=channel, error=str(err))
@@ -48,6 +50,9 @@ async def _run_benchmark_async(evaluation_id: str) -> dict:
     from app.models.latency import LatencyRecord
     from app.models.metric import Metric
     from app.models.retrieved_chunk import RetrievedChunk
+
+    # Initialize Redis client for worker process
+    await redis_client.initialize()
 
     redis_channel = f"eval:{evaluation_id}"
 
@@ -84,100 +89,131 @@ async def _run_benchmark_async(evaluation_id: str) -> dict:
         questions = q_result.scalars().all()
 
         config = evaluation.config_snapshot or {}
+        concurrency_limit = int(config.get("concurrency", 3))
+        question_timeout = float(config.get("question_timeout", 60.0))
+
         pipeline = EvaluationPipeline(
             chatbot_url=config.get("chatbot_url", "http://localhost:8000/api/v1/demo/chatbot"),
             chatbot_method=config.get("chatbot_method", "POST"),
             enabled_evaluators=evaluation.enabled_evaluators,
+            concurrency=concurrency_limit,
         )
 
         scores_by_type: dict[str, list[float]] = {}
         total_overall_scores: list[float] = []
+        completed_counter = 0
+        failed_counter = 0
+        lock = asyncio.Lock()
+        semaphore = asyncio.Semaphore(concurrency_limit)
 
-        for i, question in enumerate(questions):
-            try:
-                eval_data = await pipeline.evaluate_question(
-                    question_text=question.text,
-                    expected_answer=question.expected_answer,
-                    expected_context=question.expected_context,
-                )
+        async def process_single_question(idx: int, question: Question):
+            nonlocal completed_counter, failed_counter
+            async with semaphore:
+                eval_status = "success"
+                error_msg = None
+                eval_data = None
+                chatbot_result = {}
 
-                chatbot_result = eval_data["chatbot_result"]
-
-                # Store per-question result in PostgreSQL
-                eval_result = EvaluationResult(
-                    evaluation_id=evaluation.id,
-                    question_id=question.id,
-                    response_text=chatbot_result.get("response_text"),
-                    response_raw=chatbot_result.get("response_raw"),
-                    status="completed" if chatbot_result.get("response_text") else "failed",
-                    error_message=chatbot_result.get("error"),
-                    overall_score=eval_data.get("overall_score"),
-                )
-                session.add(eval_result)
-                await session.flush()
-
-                # Store individual metric scores
-                question_metrics = {}
-                for score in eval_data.get("scores", []):
-                    metric = Metric(
-                        result_id=eval_result.id,
-                        evaluator_type=score.evaluator_type,
-                        score=score.score,
-                        explanation=score.explanation,
-                        details=score.details,
+                try:
+                    # Execute evaluation with timeout
+                    eval_data = await asyncio.wait_for(
+                        pipeline.evaluate_question(
+                            question_text=question.text,
+                            expected_answer=question.expected_answer,
+                            expected_context=question.expected_context,
+                        ),
+                        timeout=question_timeout,
                     )
-                    session.add(metric)
-                    scores_by_type.setdefault(score.evaluator_type, []).append(score.score)
-                    question_metrics[score.evaluator_type] = score.score
+                    chatbot_result = eval_data.get("chatbot_result", {})
+                    if not chatbot_result.get("response_text"):
+                        eval_status = "failed"
+                        error_msg = chatbot_result.get("error") or "Chatbot returned empty response."
+                except asyncio.TimeoutError:
+                    eval_status = "timeout"
+                    error_msg = f"Evaluation timed out after {question_timeout}s."
+                except Exception as err:
+                    eval_status = "failed"
+                    error_msg = str(err)
 
-                # Store latency record
-                latency = LatencyRecord(
-                    result_id=eval_result.id,
-                    total_ms=chatbot_result.get("latency_ms", 0.0),
-                )
-                session.add(latency)
+                async with lock:
+                    try:
+                        # Store per-question result in PostgreSQL
+                        eval_result = EvaluationResult(
+                            evaluation_id=evaluation.id,
+                            question_id=question.id,
+                            response_text=chatbot_result.get("response_text"),
+                            response_raw=chatbot_result.get("response_raw"),
+                            status=eval_status,
+                            error_message=error_msg,
+                            overall_score=eval_data.get("overall_score") if eval_data else None,
+                        )
+                        session.add(eval_result)
+                        await session.flush()
 
-                # Store retrieved context chunks
-                for rank, chunk_data in enumerate(chatbot_result.get("retrieved_chunks", [])):
-                    chunk = RetrievedChunk(
-                        result_id=eval_result.id,
-                        content=chunk_data.get("content", ""),
-                        source=chunk_data.get("source", ""),
-                        rank=rank,
-                        relevance_score=chunk_data.get("score", 0.0),
-                    )
-                    session.add(chunk)
+                        question_metrics = {}
+                        if eval_data and eval_status == "success":
+                            for score in eval_data.get("scores", []):
+                                metric = Metric(
+                                    result_id=eval_result.id,
+                                    evaluator_type=score.evaluator_type,
+                                    score=score.score,
+                                    explanation=score.explanation,
+                                    details=score.details,
+                                )
+                                session.add(metric)
+                                scores_by_type.setdefault(score.evaluator_type, []).append(score.score)
+                                question_metrics[score.evaluator_type] = score.score
 
-                if eval_data.get("overall_score") is not None:
-                    total_overall_scores.append(eval_data["overall_score"])
+                            if eval_data.get("overall_score") is not None:
+                                total_overall_scores.append(eval_data["overall_score"])
 
-                evaluation.completed_questions = i + 1
+                            latency = LatencyRecord(
+                                result_id=eval_result.id,
+                                total_ms=chatbot_result.get("latency_ms", 0.0),
+                            )
+                            session.add(latency)
 
-                # Publish real-time WebSocket update via Redis
-                progress_pct = round(((i + 1) / len(questions)) * 100, 1)
-                await _publish_progress(redis_client, redis_channel, {
-                    "type": "progress",
-                    "evaluation_id": evaluation_id,
-                    "status": "running",
-                    "completed": i + 1,
-                    "total": len(questions),
-                    "progress_percent": progress_pct,
-                    "current_question": question.text,
-                    "latest_metrics": question_metrics,
-                })
+                            for rank, chunk_data in enumerate(chatbot_result.get("retrieved_chunks", [])):
+                                chunk = RetrievedChunk(
+                                    result_id=eval_result.id,
+                                    content=chunk_data.get("content", ""),
+                                    source=chunk_data.get("source", ""),
+                                    rank=rank,
+                                    relevance_score=chunk_data.get("score", 0.0),
+                                )
+                                session.add(chunk)
 
-            except Exception as err:
-                logger.error("question_evaluation_error", error=str(err), question_id=str(question.id))
-                evaluation.failed_questions += 1
-                evaluation.completed_questions = i + 1
-                session.add(EvaluationResult(
-                    evaluation_id=evaluation.id,
-                    question_id=question.id,
-                    status="failed",
-                    error_message=str(err),
-                ))
+                        if eval_status == "success":
+                            completed_counter += 1
+                        else:
+                            failed_counter += 1
 
-            await session.commit()
+                        evaluation.completed_questions = completed_counter + failed_counter
+                        evaluation.failed_questions = failed_counter
+                        await session.commit()
+
+                        # Publish real-time WebSocket update via Redis
+                        progress_pct = round(
+                            (evaluation.completed_questions / max(1, len(questions))) * 100, 1
+                        )
+                        await _publish_progress(redis_client, redis_channel, {
+                            "type": "progress",
+                            "evaluation_id": evaluation_id,
+                            "status": "running",
+                            "completed_questions": evaluation.completed_questions,
+                            "total_questions": len(questions),
+                            "progress": progress_pct,
+                            "progress_percent": progress_pct,
+                            "current_question": question.text,
+                            "latest_metrics": question_metrics,
+                        })
+
+                    except Exception as persist_err:
+                        logger.error("persist_question_result_failed", error=str(persist_err), qid=str(question.id))
+
+        # Run concurrent batch
+        tasks = [process_single_question(i, q) for i, q in enumerate(questions)]
+        await asyncio.gather(*tasks, return_exceptions=True)
 
         # Compute aggregated evaluation metrics
         if total_overall_scores:

@@ -28,6 +28,8 @@ class BenchmarkSuiteResponse(BaseModel):
     version: str
     question_count: int
     is_template: bool
+    source_dataset: str | None = None
+    source_subset: str | None = None
     created_at: datetime | None = None
 
     model_config = {"from_attributes": True}
@@ -48,12 +50,26 @@ class QuestionResponse(BaseModel):
     text: str
     expected_answer: str | None = None
     category: str | None = None
+    subcategory: str | None = None
     difficulty: str
+    evaluation_type: str = "rag"
     order_index: int
+    source_dataset: str | None = None
+    source_subset: str | None = None
+    source_question_id: str | None = None
+    dataset_version: str = "1.0"
     tags: list = []
+    expected_context: list[str] | None = None
     created_at: datetime | None = None
 
     model_config = {"from_attributes": True}
+
+
+class BenchmarkImportRequest(BaseModel):
+    dataset: str = Field("ragbench", description="Dataset name, e.g. ragbench")
+    subsets: list[str] = Field(default_factory=lambda: ["finqa", "tatqa", "pubmedqa", "techqa", "hotpotqa"])
+    split: str = Field("test", description="Dataset split, default: test")
+    limit_per_subset: int = Field(40, description="Max questions to import per subset")
 
 
 # ---------------------------------------------------------
@@ -99,22 +115,26 @@ class EvaluationResponse(BaseModel):
         return round((self.completed_questions / self.total_questions) * 100, 1)
 
 
-class EvaluationResultResponse(BaseModel):
-    id: uuid.UUID
-    question_id: uuid.UUID
-    response_text: str | None = None
-    status: str
-    overall_score: float | None = None
-    input_tokens: int | None = None
-    output_tokens: int | None = None
-
-    model_config = {"from_attributes": True}
-
-
 class MetricResponse(BaseModel):
     id: uuid.UUID
     evaluator_type: str
     score: float
     explanation: str | None = None
+    details: dict | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class EvaluationResultResponse(BaseModel):
+    id: uuid.UUID
+    question_id: uuid.UUID
+    question_text: str | None = None
+    expected_answer: str | None = None
+    response_text: str | None = None
+    status: str
+    overall_score: float | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    metrics: list[MetricResponse] = []
 
     model_config = {"from_attributes": True}

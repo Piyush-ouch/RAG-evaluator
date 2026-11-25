@@ -10,7 +10,7 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING
 
-from sqlalchemy import ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -48,6 +48,14 @@ class BenchmarkSuite(Base, TimestampMixin, TenantMixin):
     question_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     is_template: Mapped[bool] = mapped_column(default=False, nullable=False)
     metadata_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+
+    # Source dataset provenance
+    source_dataset: Mapped[str | None] = mapped_column(
+        String(100), nullable=True, index=True
+    )
+    source_subset: Mapped[str | None] = mapped_column(
+        String(100), nullable=True, index=True
+    )
 
     # Relationships
     project: Mapped["Project"] = relationship(
@@ -87,10 +95,29 @@ class Question(Base, TimestampMixin):
     text: Mapped[str] = mapped_column(Text, nullable=False)
     expected_answer: Mapped[str | None] = mapped_column(Text, nullable=True)
     category: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    subcategory: Mapped[str | None] = mapped_column(String(100), nullable=True)
     difficulty: Mapped[str] = mapped_column(
         String(20), nullable=False, default="medium"
     )
+    evaluation_type: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="rag"
+    )
     order_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    # Source dataset provenance
+    source_dataset: Mapped[str | None] = mapped_column(
+        String(100), nullable=True, index=True
+    )
+    source_subset: Mapped[str | None] = mapped_column(
+        String(100), nullable=True, index=True
+    )
+    source_question_id: Mapped[str | None] = mapped_column(
+        String(255), nullable=True, index=True
+    )
+    dataset_version: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="1.0"
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     # Expected context — for evaluating retrieval quality
     expected_context: Mapped[list | None] = mapped_column(JSONB, nullable=True)
